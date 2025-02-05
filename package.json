@@ -1,0 +1,25 @@
+{
+  "name": "phonology",
+  "version": "1.0.0",
+  "private": false,
+  "description": "A Typescript API for specifying and executing phonological transformation rules on IPA strings.",
+  "keywords": [
+    "ipa",
+    "phonetics",
+    "typescript",
+    "api",
+    "phonetics",
+    "phonology",
+    "nlp",
+    "natural",
+    "language"
+  ],
+  "license": "MIT",
+  "author": "Geza Kerecsenyi",
+  "type": "commonjs",
+  "main": "dist/index.ts",
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
