@@ -1,6 +1,6 @@
 {
   "name": "phonology",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": false,
   "description": "A Typescript API for specifying and executing phonological transformation rules on IPA strings.",
   "keywords": [
@@ -19,6 +19,7 @@
   "type": "commonjs",
   "main": "dist/index.ts",
   "types": "dist/index.d.ts",
+  "git": "https://github.com/gezakerecsenyi/phonology",
   "devDependencies": {
     "typescript": "^5.7.3"
   }

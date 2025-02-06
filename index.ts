@@ -808,7 +808,11 @@ export class Phoneme<T extends PhonemeType = PhonemeType> {
     }
 
     contextualize(context: PhonemeContext = {
-        inStressedSyllable: false, positionInSyllable: 0, syllableIndex: 0,
+        inStressedSyllable: false,
+        positionInSyllable: 0,
+        syllableIndex: 0,
+        wordIndex: 0,
+        positionInWord: 0,
     }) {
         return new ContextualisedPhoneme(this.ipa, this.diacritics, this.modifiers, context);
     }
@@ -818,6 +822,8 @@ interface PhonemeContext {
     inStressedSyllable: boolean;
     positionInSyllable: number;
     syllableIndex: number;
+    positionInWord: number;
+    wordIndex: number;
 }
 
 export class ContextualisedPhoneme extends Phoneme {
@@ -848,6 +854,7 @@ export class SoundSelector {
         context: ContextualisedPhoneme[]
     ) => ContextualisedPhoneme)[] = [];
     rejectionRules: ((sound: ContextualisedPhoneme, index: number, context: ContextualisedPhoneme[]) => boolean)[] = [];
+    alternativeSelectors: SoundSelector[] = [];
     negativeSample: SoundSelector | null = null;
     isNegativeSampleOf: SoundSelector | null = null;
     updatePhonemesBy: Partial<PhonemeSpec> = {};
@@ -971,6 +978,21 @@ export class SoundSelector {
         return this;
     }
 
+    startOfWord() {
+        this.rejectionRules.push(e => e.context.positionInWord > 0);
+        return this;
+    }
+
+    if(test: (sound: ContextualisedPhoneme, index: number, context: ContextualisedPhoneme[]) => boolean) {
+        this.rejectionRules.push((e, i, a) => !test(e, i, a));
+        return this;
+    }
+
+    or(alternateSelector: SoundSelector) {
+        this.alternativeSelectors.push(alternateSelector);
+        return this;
+    }
+
     addDebugger(func: (res: boolean, sound: ContextualisedPhoneme, index: number, context: ContextualisedPhoneme[]) => void) {
         this.debuggers.push(func);
         return this;
@@ -1028,25 +1050,27 @@ export class SoundSelector {
         phoneme: ContextualisedPhoneme,
         index: number = 0,
         phonemeSequence: ContextualisedPhoneme[] = [phoneme]
-    ) {
+    ): boolean {
         const result = (
-            this.fuzzySpec ?
-            Object
-                .entries(this.fuzzySpec)
-                .every(([key, value]) => phoneme.getPhoneme()[key as keyof PhonemeSpec] === value) :
-            this.sounds.some(e => this.isStrict ? e.isEquivalent(phoneme) : e.isEqual(phoneme, true))
-        ) && this.rejectionRules.every(rule => !rule(
-            phoneme,
-            index,
-            phonemeSequence
-        )) && (
-            !this.negativeSample ||
-            this.negativeSample.rejectionRules.every(rule => rule(
+            (
+                this.fuzzySpec ?
+                Object
+                    .entries(this.fuzzySpec)
+                    .every(([key, value]) => phoneme.getPhoneme()[key as keyof PhonemeSpec] === value) :
+                this.sounds.some(e => this.isStrict ? e.isEquivalent(phoneme) : e.isEqual(phoneme, true))
+            ) && this.rejectionRules.every(rule => !rule(
                 phoneme,
                 index,
                 phonemeSequence
-            ))
-        );
+            )) && (
+                !this.negativeSample ||
+                this.negativeSample.rejectionRules.every(rule => rule(
+                    phoneme,
+                    index,
+                    phonemeSequence
+                ))
+            )
+        ) || this.alternativeSelectors.some(selector => selector.testIfApplies(phoneme, index, phonemeSequence));
 
         this.debuggers.forEach(func => func(result, phoneme, index, phonemeSequence));
 
@@ -1085,6 +1109,8 @@ export class Replacer {
         let currentSyllable = 0;
         let currentSyllableIndex = 0;
         let inStressedSyllable = false;
+        let currentWord = 0;
+        let currentWordIndex = 0;
 
         const syllableStartIndices = Array
             .from(ipaString.matchAll(SoundSelector.SyllableStartRegexp))
@@ -1107,6 +1133,11 @@ export class Replacer {
 
             if (symbols.includes(currentChar as any)) {
                 phonemeSequence.push(currentChar as string);
+
+                if (currentChar === Symbols.Space) {
+                    currentWordIndex = 0;
+                    currentWord++;
+                }
             } else if (diacritics.includes(currentChar as any)) {
                 const newDiacritics = currentPhoneme!.getDiacritics();
                 newDiacritics.add(currentChar as Diacritics);
@@ -1121,11 +1152,14 @@ export class Replacer {
                         inStressedSyllable,
                         syllableIndex: currentSyllable,
                         positionInSyllable: currentSyllableIndex,
+                        wordIndex: currentWord,
+                        positionInWord: currentWordIndex,
                     }
                 );
                 phonemeSequence.push(currentPhoneme);
 
                 currentSyllableIndex++;
+                currentWordIndex++;
             }
         }
 
@@ -1152,3 +1186,62 @@ export class Replacer {
         return this.rules.reduce((a, e) => Replacer.applyRuleToIPA(a, e), ipaString);
     }
 }
+
+export const PreFortisClipping = SoundSelector
+    .fromSpec({type: PhonemeType.Vowel})
+    .beforeSpec({type: PhonemeType.Consonant, voiced: false})
+    .addReplacer(phoneme => phoneme.shorten());
+
+export const RhoticApproximant = SoundSelector
+    .fromSounds('r')
+    .addStringReplacer(() => 'ɹ');
+
+export const LinkingW = SoundSelector
+    .fromSounds('u')
+    .before(SoundSelector.fromSpec({type: PhonemeType.Vowel}).startOfSyllable())
+    .addStringReplacer(e => `${e}w`);
+
+export const LinkingR = SoundSelector
+    .fromSpec({type: PhonemeType.Vowel})
+    .before(SoundSelector.fromSpec({type: PhonemeType.Vowel}).startOfSyllable())
+    .not('u')
+    .addStringReplacer((e) => `${e}ɹ`);
+
+export const PreNasalisation = SoundSelector
+    .fromSpec({type: PhonemeType.Vowel})
+    .beforeSpec({type: PhonemeType.Consonant, manner: Manner.nasal})
+    .addReplacer(phoneme => phoneme.setNasal(true));
+
+export const PostNasalisation = SoundSelector
+    .fromSpec({type: PhonemeType.Vowel})
+    .afterSpec({type: PhonemeType.Consonant, manner: Manner.nasal})
+    .addReplacer(phoneme => phoneme.setNasal(true));
+
+export const Derhoticize = SoundSelector
+    .fromSounds('ɹ', 'r')
+    .not()
+    .beforeSpec({type: PhonemeType.Vowel})
+    .addStringReplacer(() => '');
+
+export const AspiratedStops = SoundSelector
+    .fromSpec({type: PhonemeType.Consonant, manner: Manner.plosive})
+    .startOfSyllable()
+    .inStressedSyllable()
+    .beforeSpec({type: PhonemeType.Vowel})
+    .or(
+        SoundSelector
+            .fromSpec({type: PhonemeType.Consonant, manner: Manner.plosive})
+            .startOfWord()
+            .beforeSpec({type: PhonemeType.Vowel})
+    )
+    .addReplacer(phoneme => phoneme.setAspirated(true));
+
+export const DevoicedLiquidsPostStops = SoundSelector
+    .fromSpec({type: PhonemeType.Consonant, isLiquid: true})
+    .after(SoundSelector.fromSpec({type: PhonemeType.Consonant, manner: Manner.plosive}).startOfSyllable().inStressedSyllable())
+    .or(
+        SoundSelector
+            .fromSpec({type: PhonemeType.Consonant, isLiquid: true})
+            .after(SoundSelector.fromSpec({type: PhonemeType.Consonant, manner: Manner.plosive}).startOfSyllable().startOfWord())
+    )
+    .updatePhonemes({ voiced: false });
